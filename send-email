@@ -1,0 +1,119 @@
+#!/bin/bash
+VERSION='1.0.0'
+
+function help () {
+    echo -e "\n\
+GNU send-email is a bash script based on SENDGRID (https://sendgrid.com/) that\n\
+notifyes you via e-mail.\n\
+\n\
+USAGE: send-email [OPTIONS]...\n\
+\n\
+This application is based on SENDGRID, so you have to provide a valid API KEY to\n\
+be able to use SENDGRID's REST API. Before calling this script make sure you\n\
+have exported the environment variable SENDGRID_API_KEY.\n\
+To obtain a valid API KEY please visit the related documentation on SENDGRID web\n\
+site at https://sendgrid.com.\n\
+\n\
+OPTIONS:\n\
+\n\
+  -f, --from-addr         Set the e-mail address for the sender. The default\n\
+                          value is 'send-email@script.bash'.\n\
+  -F, --from-name         Set the name for the sender. The default value is\n\
+                          'Send EMail'.\n\
+  -h, --help              Shot this help.\n\
+  -m, --message           Set the e-mail body messate. An empty string is the\n\
+                          default value.\n\
+  -r, --recipients        A comma separated list of e-mail addresses used as\n\
+                          recipients. This value is mandatory.\n\
+  -s, --subject           Set the e-mail subject. If omitted the default value\n\
+                          'An e-mail for you' is used.\n\
+  -v, --version           Show version info.\n\
+\n\
+For bugs and other informations, please visit\n\
+https://github.com/mircobe87/send-email"
+}
+
+function version () {
+    echo -e "send-email $VERSION"
+}
+
+function jsonStringify () {
+    printf '%s' "$1" | python -c 'import json,sys; print(json.dumps(sys.stdin.read()))'
+}
+
+# check if the command CURL is installed
+command -v curl &> /dev/null || { echo "I require 'curl' but it's not installed." >&2; exit 1; }
+# check if the command PYTHON is installed
+command -v python &> /dev/null || { echo "I require 'python' but it's not installed." >&2; exit 1; }
+
+if [ -z $SENDGRID_API_KEY ]; then
+    echo "no value provider for environment variable SENDGRID_API_KEY" >&2
+    help
+    exit 1
+fi
+
+MAIL_SUBJECT='An e-mail for you'
+FROM_NAME='Send EMail'
+FROM_ADDR='send-email@script.bash'
+MESSAGE="$(jsonStringify " ")"
+
+while [[ $# -gt 0 ]]; do
+    key="$1"
+    case $key in
+    -s|--subject)
+        MAIL_SUBJECT="$2"
+        shift # past argument
+        shift # past value
+        ;;
+    -m|--message)
+        MESSAGE="$(jsonStringify "$2")"
+        shift # past argument
+        shift # past value
+        ;;
+    -f|--from-addr)
+        FROM_ADDR="$2"
+        shift # past argument
+        shift # past value
+        ;;
+    -F|--from-name)
+        FROM_NAME="$2"
+        shift # past argument
+        shift # past value
+        ;;
+    -r|--recipients)
+        RECIPIENTS=${2//,/ }
+        shift # past argument
+        shift # past value
+        ;;
+    -h|--help)
+        help
+        exit 0
+        ;;
+    -v|--version)
+        version
+        exit 0
+        ;;
+    *)    # unknown option
+        shift # past argument
+        ;;
+    esac
+done
+set -- "${RECIPIENTS[@]}"
+
+if [ $# -le 0 ]; then
+    echo "missing recipients list. (-r, --recipients)" >&2
+    help
+    exit 1
+fi
+
+echo "[$(date +'%F %X %Z')]" "sending email to:" $@
+for MAIL_ADDR in $@; do
+    BODY="{ \"personalizations\": [ { \"to\": [ { \"email\": \"$MAIL_ADDR\", \"name\": \"$MAIL_ADDR\" } ], \"subject\": \"$MAIL_SUBJECT\" } ], \"from\": { \"email\": \"$FROM_ADDR\", \"name\": \"$FROM_NAME\" }, \"content\": [{\"type\": \"text/plain\", \"value\": $MESSAGE}] }"
+    echo "[$(date +'%F %X %Z')]" $MAIL_ADDR $BODY
+    curl --request POST \
+         --url https://api.sendgrid.com/v3/mail/send \
+         --header "authorization: Bearer $SENDGRID_API_KEY" \
+         --header 'content-type: application/json' \
+         --data "$BODY"
+done
+exit 0
